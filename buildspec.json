@@ -33,11 +33,11 @@
     },
     "platformConfig": {
         "macos": {
-            "bundleId": "com.example.plugintemplate-for-obs"
+            "bundleId": "com.example.obs-udp-mjpeg-streamer"
         }
     },
-    "name": "plugintemplate-for-obs",
-    "displayName": "Plugin Template for OBS",
+    "name": "obs-udp-mjpeg-streamer",
+    "displayName": "UDP MJPEG Preview Streamer for OBS",
     "version": "1.0.0",
     "author": "Your Name Here",
     "website": "https://example.com",
