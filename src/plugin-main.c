@@ -1069,6 +1069,7 @@ static void udp_mjpeg_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, "port", DEFAULT_PORT);
 	obs_data_set_default_string(settings, "host", DEFAULT_HOST);
 	obs_data_set_default_int(settings, "quality", DEFAULT_JPEG_QUALITY);
+	obs_data_set_default_bool(settings, "raw_video", true);
 }
 
 static obs_properties_t *udp_mjpeg_properties(void *unused)
