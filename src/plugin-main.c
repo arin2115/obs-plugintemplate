@@ -78,6 +78,8 @@ struct udp_mjpeg_streamer {
 	socket_t sock;
 	struct sockaddr_in dest_addr;
 	bool socket_initialized;
+	uint32_t frame_id;
+	uint8_t *packet_buffer;
 
 	/* Threading */
 	pthread_t capture_thread;
@@ -745,7 +747,7 @@ static bool init_socket(struct udp_mjpeg_streamer *stream)
 	inet_pton(AF_INET, stream->host, &stream->dest_addr.sin_addr);
 
 	stream->socket_initialized = true;
-	obs_log(LOG_INFO, "Socket initialized: %s:%d", stream->host, stream->port);
+	obs_log(LOG_INFO, "Socket initialized to port %d", stream->port);
 
 	return true;
 }
@@ -769,9 +771,13 @@ static bool send_frame(struct udp_mjpeg_streamer *stream, uint8_t *data, size_t 
 		return false;
 	}
 
-	/* For frames larger than MTU, we need to fragment */
-	/* Simple approach: send entire frame (may need fragmentation at IP level) */
-	/* For production, consider implementing RTP/MJPEG fragmentation */
+	/*
+	 * Handle frame fragmentation for large JPEG frames.
+	 * Small frames (< 65507 bytes) are sent as a single UDP packet.
+	 * Large frames are split into chunks with a simple header protocol.
+	 * Note: For full MJPEG streaming compatibility, consider implementing
+	 * RTP/MJPEG (RFC 2435) fragmentation in the future.
+	 */
 
 	if (size <= MAX_UDP_PACKET_SIZE) {
 		int result = sendto(stream->sock, (const char *)data, (int)size, 0,
@@ -784,16 +790,14 @@ static bool send_frame(struct udp_mjpeg_streamer *stream, uint8_t *data, size_t 
 		stream->frames_sent++;
 		return true;
 	} else {
-		/* Frame is too large, split into chunks */
-		/* Add simple header: [4 bytes frame_id][4 bytes chunk_id][4 bytes total_chunks][data] */
-		static uint32_t frame_id = 0;
-		frame_id++;
+		/* Frame is too large, split into chunks with simple header:
+		   [4 bytes frame_id][4 bytes chunk_id][4 bytes total_chunks][data] */
+		stream->frame_id++;
 
 		size_t chunk_data_size = MAX_UDP_PACKET_SIZE - 12; /* Header is 12 bytes */
 		uint32_t total_chunks = (uint32_t)((size + chunk_data_size - 1) / chunk_data_size);
 
-		uint8_t *packet = (uint8_t *)bmalloc(MAX_UDP_PACKET_SIZE);
-		if (!packet)
+		if (!stream->packet_buffer)
 			return false;
 
 		size_t offset = 0;
@@ -802,24 +806,23 @@ static bool send_frame(struct udp_mjpeg_streamer *stream, uint8_t *data, size_t 
 				(offset + chunk_data_size > size) ? (size - offset) : chunk_data_size;
 
 			/* Write header */
-			memcpy(packet, &frame_id, 4);
-			memcpy(packet + 4, &chunk, 4);
-			memcpy(packet + 8, &total_chunks, 4);
-			memcpy(packet + 12, data + offset, chunk_size);
+			memcpy(stream->packet_buffer, &stream->frame_id, 4);
+			memcpy(stream->packet_buffer + 4, &chunk, 4);
+			memcpy(stream->packet_buffer + 8, &total_chunks, 4);
+			memcpy(stream->packet_buffer + 12, data + offset, chunk_size);
 
-			int result = sendto(stream->sock, (const char *)packet, (int)(chunk_size + 12),
-					    0, (struct sockaddr *)&stream->dest_addr,
+			int result = sendto(stream->sock, (const char *)stream->packet_buffer,
+					    (int)(chunk_size + 12), 0,
+					    (struct sockaddr *)&stream->dest_addr,
 					    sizeof(stream->dest_addr));
 
 			if (result == SOCKET_ERROR_VAL) {
-				bfree(packet);
 				return false;
 			}
 
 			offset += chunk_size;
 		}
 
-		bfree(packet);
 		stream->bytes_sent += size + (total_chunks * 12);
 		stream->frames_sent++;
 		return true;
@@ -969,11 +972,14 @@ static void *udp_mjpeg_create(obs_data_t *settings, obs_output_t *output)
 	stream->jpeg_buffer_size = (size_t)(stream->width * stream->height * 3 + 1024);
 	stream->jpeg_buffer = (uint8_t *)bmalloc(stream->jpeg_buffer_size);
 
+	/* Allocate packet buffer for frame fragmentation */
+	stream->packet_buffer = (uint8_t *)bmalloc(MAX_UDP_PACKET_SIZE);
+	stream->frame_id = 0;
+
 	pthread_mutex_init(&stream->mutex, NULL);
 
-	obs_log(LOG_INFO, "UDP MJPEG Streamer created: %dx%d @ %dfps -> %s:%d (quality: %d)",
-		stream->width, stream->height, stream->fps, stream->host, stream->port,
-		stream->quality);
+	obs_log(LOG_INFO, "UDP MJPEG Streamer created: %dx%d @ %dfps (quality: %d)",
+		stream->width, stream->height, stream->fps, stream->quality);
 
 	return stream;
 }
@@ -991,6 +997,10 @@ static void udp_mjpeg_destroy(void *data)
 
 	if (stream->jpeg_buffer) {
 		bfree(stream->jpeg_buffer);
+	}
+
+	if (stream->packet_buffer) {
+		bfree(stream->packet_buffer);
 	}
 
 	if (stream->host) {
