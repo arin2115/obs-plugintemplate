@@ -49,7 +49,7 @@ typedef int socket_t;
 #define DEFAULT_FPS 144
 #define DEFAULT_PORT 5000
 #define DEFAULT_HOST "127.0.0.1"
-#define DEFAULT_QUALITY 80
+#define DEFAULT_JPEG_QUALITY 80
 
 /* Maximum UDP packet size (considering MTU) */
 #define MAX_UDP_PACKET_SIZE 65507
@@ -1068,7 +1068,7 @@ static void udp_mjpeg_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, "fps", DEFAULT_FPS);
 	obs_data_set_default_int(settings, "port", DEFAULT_PORT);
 	obs_data_set_default_string(settings, "host", DEFAULT_HOST);
-	obs_data_set_default_int(settings, "quality", DEFAULT_QUALITY);
+	obs_data_set_default_int(settings, "quality", DEFAULT_JPEG_QUALITY);
 }
 
 static obs_properties_t *udp_mjpeg_properties(void *unused)
